@@ -1,14 +1,16 @@
 import Head from 'next/head'
 
 export default function Home() {
-  return (
-    <>
-      <Head>
-        <title>Cloud Password Manager</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </Head>
-      
-      {<!DOCTYPE html>
+    return (
+        <>
+            <Head>
+                <title>Cloud Password Manager</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+            </Head>
+
+            <div dangerouslySetInnerHTML={{
+                __html: `
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -466,8 +468,8 @@ export default function Home() {
         // CLOUD CONFIGURATION
         // ====================================
         
-        // CHANGE THIS to your Vercel deployment URL
-        const API_BASE_URL = 'https://your-password-manager.vercel.app/api';
+        // Change this to your actual API endpoint
+        const API_BASE_URL = '/api';
         
         // Device identification for multi-device support
         const DEVICE_ID = getOrCreateDeviceId();
@@ -491,7 +493,7 @@ export default function Home() {
 
         async function cloudRequest(endpoint, data = {}) {
             try {
-                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                const response = await fetch(\`\${API_BASE_URL}\${endpoint}\`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -503,7 +505,7 @@ export default function Home() {
                 });
 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                    throw new Error(\`HTTP \${response.status}\`);
                 }
 
                 return await response.json();
@@ -541,17 +543,526 @@ export default function Home() {
             const statusText = document.getElementById('statusText');
             
             isOnline = online;
-            statusDiv.className = `cloud-status ${}
-      <div dangerouslySetInnerHTML={{
-        __html: `
-        <!-- Your entire HTML from the cloud password manager artifact -->
-        <!-- But change the JavaScript API_BASE_URL line to: -->
-        <script>
-          const API_BASE_URL = '/api';
-          // ... rest of your JavaScript code
-        </script>
+            statusDiv.className = \`cloud-status \${online ? 'online' : 'offline'}\`;
+            statusIcon.textContent = online ? '☁️' : '⚠️';
+            statusText.textContent = message;
+        }
+
+        function showSetupSection() {
+            document.getElementById('setupSection').style.display = 'block';
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('mainApp').classList.add('hidden');
+        }
+
+        function showAuthSection() {
+            document.getElementById('setupSection').style.display = 'none';
+            document.getElementById('authSection').style.display = 'block';
+            document.getElementById('mainApp').classList.add('hidden');
+        }
+
+        function showMainApp() {
+            document.getElementById('setupSection').style.display = 'none';
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('mainApp').classList.remove('hidden');
+        }
+
+        // ====================================
+        // ENCRYPTION FUNCTIONS
+        // ====================================
+
+        async function generateKey(password) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const hash = await crypto.subtle.digest('SHA-256', data);
+            return await crypto.subtle.importKey(
+                'raw',
+                hash,
+                { name: 'AES-GCM' },
+                false,
+                ['encrypt', 'decrypt']
+            );
+        }
+
+        async function encrypt(text, password) {
+            const key = await generateKey(password);
+            const encoder = new TextEncoder();
+            const data = encoder.encode(text);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            
+            const encrypted = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: iv },
+                key,
+                data
+            );
+            
+            const result = new Uint8Array(iv.length + encrypted.byteLength);
+            result.set(iv);
+            result.set(new Uint8Array(encrypted), iv.length);
+            
+            return Array.from(result).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function decrypt(encryptedHex, password) {
+            const key = await generateKey(password);
+            const encrypted = new Uint8Array(encryptedHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+            
+            const iv = encrypted.slice(0, 12);
+            const data = encrypted.slice(12);
+            
+            const decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: iv },
+                key,
+                data
+            );
+            
+            return new TextDecoder().decode(decrypted);
+        }
+
+        async function hashPassword(password) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const hash = await crypto.subtle.digest('SHA-256', data);
+            return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // ====================================
+        // AUTHENTICATION FUNCTIONS
+        // ====================================
+
+        async function setupMasterPassword() {
+            const password = document.getElementById('newMasterPassword').value;
+            const confirmPassword = document.getElementById('confirmMasterPassword').value;
+            
+            if (!password || !confirmPassword) {
+                showToast('Please fill in both password fields', 'error');
+                return;
+            }
+            
+            if (password !== confirmPassword) {
+                showToast('Passwords do not match', 'error');
+                return;
+            }
+            
+            if (password.length < 8) {
+                showToast('Master password must be at least 8 characters long', 'error');
+                return;
+            }
+            
+            setLoading('setup', true);
+            
+            try {
+                const hashedPassword = await hashPassword(password);
+                
+                if (isOnline) {
+                    await cloudRequest('/auth', {
+                        action: 'setup',
+                        masterPassword: hashedPassword
+                    });
+                } else {
+                    localStorage.setItem('masterPasswordHash', hashedPassword);
+                }
+                
+                masterKey = password;
+                showMainApp();
+                await loadPasswords();
+                showToast('Master password created successfully!', 'success');
+                
+            } catch (error) {
+                showToast('Failed to create master password', 'error');
+                console.error(error);
+            } finally {
+                setLoading('setup', false);
+            }
+        }
+
+        async function authenticate() {
+            const password = document.getElementById('masterPassword').value;
+            
+            if (!password) {
+                showToast('Please enter your master password', 'error');
+                return;
+            }
+            
+            setLoading('auth', true);
+            
+            try {
+                const hashedPassword = await hashPassword(password);
+                
+                if (isOnline) {
+                    const result = await cloudRequest('/auth', {
+                        action: 'verify',
+                        masterPassword: hashedPassword
+                    });
+                    
+                    if (!result.success) {
+                        showToast('Incorrect master password', 'error');
+                        return;
+                    }
+                } else {
+                    const storedHash = localStorage.getItem('masterPasswordHash');
+                    if (!storedHash || storedHash !== hashedPassword) {
+                        showToast('Incorrect master password', 'error');
+                        return;
+                    }
+                }
+                
+                masterKey = password;
+                showMainApp();
+                await loadPasswords();
+                showToast('Successfully authenticated!', 'success');
+                
+            } catch (error) {
+                showToast('Authentication failed', 'error');
+                console.error(error);
+            } finally {
+                setLoading('auth', false);
+            }
+        }
+
+        // ====================================
+        // PASSWORD MANAGEMENT
+        // ====================================
+
+        async function savePassword() {
+            const website = document.getElementById('website').value.trim();
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            
+            if (!website || !username || !password) {
+                showToast('Please fill in all fields', 'error');
+                return;
+            }
+            
+            setLoading('save', true);
+            
+            try {
+                const encryptedPassword = await encrypt(password, masterKey);
+                
+                const passwordData = {
+                    website: website,
+                    username: username,
+                    encrypted_password: encryptedPassword,
+                    created_at: new Date().toISOString()
+                };
+                
+                if (isOnline) {
+                    await cloudRequest('/passwords', {
+                        action: 'save',
+                        data: passwordData
+                    });
+                } else {
+                    const localPasswords = JSON.parse(localStorage.getItem('passwords') || '[]');
+                    passwordData.id = Date.now();
+                    localPasswords.push(passwordData);
+                    localStorage.setItem('passwords', JSON.stringify(localPasswords));
+                }
+                
+                // Clear form
+                document.getElementById('website').value = '';
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+                
+                showToast('Password saved successfully!', 'success');
+                await loadPasswords();
+                
+            } catch (error) {
+                showToast('Failed to save password', 'error');
+                console.error(error);
+            } finally {
+                setLoading('save', false);
+            }
+        }
+
+        async function loadPasswords() {
+            try {
+                if (isOnline) {
+                    const result = await cloudRequest('/passwords', {
+                        action: 'list'
+                    });
+                    passwords = result.passwords || [];
+                } else {
+                    passwords = JSON.parse(localStorage.getItem('passwords') || '[]');
+                }
+                
+                displayPasswords();
+                
+            } catch (error) {
+                showToast('Failed to load passwords', 'error');
+                console.error(error);
+            }
+        }
+
+        async function deletePassword(id) {
+            if (confirm('Are you sure you want to delete this password?')) {
+                try {
+                    if (isOnline) {
+                        await cloudRequest('/passwords', {
+                            action: 'delete',
+                            id: id
+                        });
+                    } else {
+                        const localPasswords = JSON.parse(localStorage.getItem('passwords') || '[]');
+                        const filteredPasswords = localPasswords.filter(p => p.id !== id);
+                        localStorage.setItem('passwords', JSON.stringify(filteredPasswords));
+                    }
+                    
+                    showToast('Password deleted successfully', 'success');
+                    await loadPasswords();
+                    
+                } catch (error) {
+                    showToast('Failed to delete password', 'error');
+                    console.error(error);
+                }
+            }
+        }
+
+        async function copyPassword(encryptedPassword) {
+            try {
+                const password = await decrypt(encryptedPassword, masterKey);
+                await navigator.clipboard.writeText(password);
+                showToast('Password copied to clipboard!', 'success');
+            } catch (error) {
+                showToast('Failed to copy password', 'error');
+                console.error(error);
+            }
+        }
+
+        function displayPasswords() {
+            const list = document.getElementById('passwordList');
+            const count = document.getElementById('passwordCount');
+            
+            count.textContent = passwords.length;
+            
+            if (passwords.length === 0) {
+                list.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">No passwords saved yet</p>';
+                return;
+            }
+            
+            // Sort by website name
+            passwords.sort((a, b) => a.website.localeCompare(b.website));
+            
+            list.innerHTML = passwords.map(p => \`
+                <div class="password-item">
+                    <div class="password-info">
+                        <h3>\${p.website}</h3>
+                        <p>Username: \${p.username}</p>
+                        <p>Created: \${new Date(p.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <div class="password-actions">
+                        <button class="btn btn-small btn-copy" onclick="copyPassword('\${p.encrypted_password}')">Copy Password</button>
+                        <button class="btn btn-small btn-copy" onclick="copyToClipboard('\${p.username}')">Copy Username</button>
+                        <button class="btn btn-small btn-delete" onclick="deletePassword(\${p.id})">Delete</button>
+                    </div>
+                </div>
+            \`).join('');
+        }
+
+        // ====================================
+        // SYNC FUNCTIONS
+        // ====================================
+
+        async function syncPasswords() {
+            if (!isOnline) {
+                showToast('Cannot sync - offline mode', 'error');
+                return;
+            }
+            
+            setLoading('sync', true);
+            showSyncIndicator(true);
+            
+            try {
+                await loadPasswords();
+                showToast('Passwords synced successfully!', 'success');
+            } catch (error) {
+                showToast('Sync failed', 'error');
+                console.error(error);
+            } finally {
+                setLoading('sync', false);
+                showSyncIndicator(false);
+            }
+        }
+
+        // ====================================
+        // PASSWORD GENERATOR
+        // ====================================
+
+        function generatePassword() {
+            const length = parseInt(document.getElementById('length').value);
+            const uppercase = document.getElementById('uppercase').checked;
+            const lowercase = document.getElementById('lowercase').checked;
+            const numbers = document.getElementById('numbers').checked;
+            const symbols = document.getElementById('symbols').checked;
+
+            let charset = '';
+            if (uppercase) charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            if (lowercase) charset += 'abcdefghijklmnopqrstuvwxyz';
+            if (numbers) charset += '0123456789';
+            if (symbols) charset += '!@#$%^&*()_+-=[]{}|;:,.<>?';
+
+            if (!charset) {
+                showToast('Please select at least one character type', 'error');
+                return;
+            }
+
+            let password = '';
+            for (let i = 0; i < length; i++) {
+                password += charset.charAt(Math.floor(Math.random() * charset.length));
+            }
+
+            document.getElementById('generatedPassword').textContent = password;
+            document.getElementById('password').value = password;
+            updateStrengthMeter(password);
+        }
+
+        function updateLength() {
+            const length = document.getElementById('length').value;
+            document.getElementById('lengthValue').textContent = length;
+        }
+
+        function updateStrengthMeter(password) {
+            const strength = calculateStrength(password);
+            const fill = document.getElementById('strengthFill');
+            
+            if (strength < 3) {
+                fill.className = 'strength-fill strength-weak';
+                fill.style.width = '33%';
+            } else if (strength < 5) {
+                fill.className = 'strength-fill strength-medium';
+                fill.style.width = '66%';
+            } else {
+                fill.className = 'strength-fill strength-strong';
+                fill.style.width = '100%';
+            }
+        }
+
+        function calculateStrength(password) {
+            let strength = 0;
+            if (password.length >= 8) strength++;
+            if (password.length >= 12) strength++;
+            if (/[a-z]/.test(password)) strength++;
+            if (/[A-Z]/.test(password)) strength++;
+            if (/[0-9]/.test(password)) strength++;
+            if (/[^A-Za-z0-9]/.test(password)) strength++;
+            return strength;
+        }
+
+        // ====================================
+        // UTILITY FUNCTIONS
+        // ====================================
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard!', 'success');
+            }).catch(() => {
+                showToast('Failed to copy', 'error');
+            });
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.background = type === 'error' ? '#dc3545' : '#28a745';
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function setLoading(type, isLoading) {
+            const textElement = document.getElementById(\`\${type}BtnText\`);
+            const loaderElement = document.getElementById(\`\${type}Loader\`);
+            const buttonElement = document.getElementById(\`\${type}Btn\`);
+            
+            if (isLoading) {
+                textElement.classList.add('hidden');
+                loaderElement.classList.remove('hidden');
+                buttonElement.disabled = true;
+            } else {
+                textElement.classList.remove('hidden');
+                loaderElement.classList.add('hidden');
+                buttonElement.disabled = false;
+            }
+        }
+
+        function showSyncIndicator(show) {
+            const indicator = document.getElementById('syncIndicator');
+            indicator.style.display = show ? 'block' : 'none';
+        }
+
+        async function resetAllData() {
+            if (confirm('Are you sure you want to delete ALL data? This cannot be undone!')) {
+                if (confirm('This will permanently delete your master password and all saved passwords. Are you absolutely sure?')) {
+                    try {
+                        if (isOnline) {
+                            await cloudRequest('/auth', {
+                                action: 'reset'
+                            });
+                        } else {
+                            localStorage.removeItem('masterPasswordHash');
+                            localStorage.removeItem('passwords');
+                        }
+                        
+                        showToast('All data deleted successfully', 'success');
+                        setTimeout(() => location.reload(), 1000);
+                        
+                    } catch (error) {
+                        showToast('Failed to delete data', 'error');
+                        console.error(error);
+                    }
+                }
+            }
+        }
+
+        function checkLocalAuth() {
+            const storedHash = localStorage.getItem('masterPasswordHash');
+            if (storedHash) {
+                showAuthSection();
+            } else {
+                showSetupSection();
+            }
+        }
+
+        // ====================================
+        // INITIALIZATION
+        // ====================================
+
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                await checkCloudStatus();
+                
+                // Event listeners for Enter key
+                document.getElementById('masterPassword').addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') authenticate();
+                });
+                
+                document.getElementById('confirmMasterPassword').addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') setupMasterPassword();
+                });
+
+                // Generate initial password
+                generatePassword();
+                
+                // Network status monitoring
+                window.addEventListener('online', () => {
+                    updateCloudStatus(true, 'Back online');
+                    checkCloudStatus();
+                });
+                
+                window.addEventListener('offline', () => {
+                    updateCloudStatus(false, 'Offline mode');
+                });
+                
+            } catch (error) {
+                console.error('Failed to initialize application:', error);
+                showToast('Failed to initialize password manager', 'error');
+            }
+        });
+    </script>
+</body>
+</html>
         `
-      }} />
-    </>
-  )
+            }} />
+        </>
+    )
 }
