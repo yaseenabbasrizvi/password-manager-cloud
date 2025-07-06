@@ -491,30 +491,37 @@ export default function Home() {
         // CLOUD API FUNCTIONS
         // ====================================
 
-        async function cloudRequest(endpoint, data = {}) {
-            try {
-                const response = await fetch(\`\${API_BASE_URL}\${endpoint}\`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        ...data,
-                        deviceId: DEVICE_ID
-                    })
-                });
+async function cloudRequest(endpoint, data = {}) {
+    console.log('Making request to:', endpoint, 'with data:', data); // Debug log
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...data,
+                deviceId: DEVICE_ID
+            })
+        });
 
-                if (!response.ok) {
-                    throw new Error(\`HTTP \${response.status}\`);
-                }
-
-                return await response.json();
-            } catch (error) {
-                console.error('Cloud request failed:', error);
-                updateCloudStatus(false, 'Connection failed');
-                throw error;
-            }
+        console.log('Response status:', response.status); // Debug log
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
         }
+
+        const result = await response.json();
+        console.log('Response data:', result); // Debug log
+        
+        return result;
+    } catch (error) {
+        console.error('Cloud request failed:', error);
+        updateCloudStatus(false, 'Connection failed');
+        throw error;
+    }
+}
 
         async function checkCloudStatus() {
             try {

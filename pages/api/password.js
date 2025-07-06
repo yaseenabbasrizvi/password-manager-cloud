@@ -6,25 +6,22 @@ const supabase = createClient(
 )
 
 export default async function handler(req, res) {
-  // Add CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end()
-    return
-  }
-
+  console.log('Passwords API called - Method:', req.method)
+  console.log('Request body:', req.body)
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { action, deviceId, website, username, encryptedPassword, passwordId } = req.body
+  const { action, deviceId } = req.body
 
-  console.log('Passwords API called:', { action, deviceId, website, username })
+  if (!action || !deviceId) {
+    return res.status(400).json({ error: 'Missing required fields' })
+  }
 
   try {
+    console.log(`Processing passwords action: ${action} for device: ${deviceId}`)
+
     if (action === 'load') {
       const { data, error } = await supabase
         .from('passwords')
@@ -33,16 +30,22 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: false })
       
       if (error) {
-        console.error('Load error:', error)
-        throw error
+        console.error('Load passwords error:', error)
+        return res.status(500).json({ error: 'Database error', details: error.message })
       }
       
-      console.log('Load successful:', data?.length, 'passwords')
+      console.log(`Loaded ${data?.length || 0} passwords`)
       return res.json({ success: true, data: data || [] })
     }
 
     if (action === 'save') {
-      // Check for existing entry
+      const { website, username, encryptedPassword } = req.body
+      
+      if (!website || !username || !encryptedPassword) {
+        return res.status(400).json({ error: 'Missing required fields for save' })
+      }
+
+      // Check for existing entry (case insensitive)
       const { data: existing, error: checkError } = await supabase
         .from('passwords')
         .select('id')
@@ -52,32 +55,29 @@ export default async function handler(req, res) {
       
       if (checkError) {
         console.error('Check existing error:', checkError)
-        throw checkError
+        return res.status(500).json({ error: 'Database error', details: checkError.message })
       }
-
-      console.log('Existing check result:', existing)
 
       if (existing && existing.length > 0) {
         // Update existing
-        const { data, error } = await supabase
+        const { error: updateError } = await supabase
           .from('passwords')
           .update({ 
             encrypted_password: encryptedPassword, 
             updated_at: new Date().toISOString() 
           })
           .eq('id', existing[0].id)
-          .select()
         
-        if (error) {
-          console.error('Update error:', error)
-          throw error
+        if (updateError) {
+          console.error('Update error:', updateError)
+          return res.status(500).json({ error: 'Database error', details: updateError.message })
         }
         
-        console.log('Update successful:', data)
+        console.log('Password updated successfully')
         return res.json({ success: true, message: 'Password updated' })
       } else {
         // Create new
-        const { data, error } = await supabase
+        const { error: insertError } = await supabase
           .from('passwords')
           .insert([{
             device_id: deviceId,
@@ -85,32 +85,36 @@ export default async function handler(req, res) {
             username,
             encrypted_password: encryptedPassword
           }])
-          .select()
         
-        if (error) {
-          console.error('Insert error:', error)
-          throw error
+        if (insertError) {
+          console.error('Insert error:', insertError)
+          return res.status(500).json({ error: 'Database error', details: insertError.message })
         }
         
-        console.log('Insert successful:', data)
+        console.log('Password saved successfully')
         return res.json({ success: true, message: 'Password saved' })
       }
     }
 
     if (action === 'delete') {
-      const { data, error } = await supabase
+      const { passwordId } = req.body
+      
+      if (!passwordId) {
+        return res.status(400).json({ error: 'Password ID required' })
+      }
+
+      const { error } = await supabase
         .from('passwords')
         .delete()
         .eq('id', passwordId)
         .eq('device_id', deviceId)
-        .select()
       
       if (error) {
         console.error('Delete error:', error)
-        throw error
+        return res.status(500).json({ error: 'Database error', details: error.message })
       }
       
-      console.log('Delete successful:', data)
+      console.log('Password deleted successfully')
       return res.json({ success: true })
     }
 

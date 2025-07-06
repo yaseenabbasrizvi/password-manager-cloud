@@ -7,64 +7,42 @@ const supabase = createClient(
 )
 
 export default async function handler(req, res) {
-  // Add CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end()
-    return
-  }
-
+  console.log('Auth API called - Method:', req.method)
+  console.log('Request body:', req.body)
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   const { action, masterPassword, deviceId } = req.body
 
-  console.log('Auth API called:', { action, deviceId }) // Debug log
+  if (!action || !deviceId) {
+    return res.status(400).json({ error: 'Missing required fields' })
+  }
 
   try {
+    console.log(`Processing action: ${action} for device: ${deviceId}`)
+
     if (action === 'setup') {
-      const hash = await bcrypt.hash(masterPassword, 12)
+      if (!masterPassword) {
+        return res.status(400).json({ error: 'Master password required' })
+      }
+
+      const hash = await bcrypt.hash(masterPassword, 10) // Reduced from 12 to 10 for faster processing
+      console.log('Generated hash for setup')
+      
       const { data, error } = await supabase
         .from('master_password')
         .insert([{ device_id: deviceId, password_hash: hash }])
         .select()
       
       if (error) {
-        console.error('Setup error:', error)
-        throw error
+        console.error('Supabase insert error:', error)
+        return res.status(500).json({ error: 'Database error', details: error.message })
       }
       
-      console.log('Setup successful:', data)
+      console.log('Setup successful')
       return res.json({ success: true })
-    }
-
-    if (action === 'login') {
-      const { data, error } = await supabase
-        .from('master_password')
-        .select('password_hash')
-        .eq('device_id', deviceId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      
-      if (error) {
-        console.error('Login query error:', error)
-        throw error
-      }
-      
-      console.log('Login query result:', data)
-      
-      if (!data || data.length === 0) {
-        return res.json({ success: false, isFirstTime: true })
-      }
-      
-      const isValid = await bcrypt.compare(masterPassword, data[0].password_hash)
-      console.log('Password verification:', isValid)
-      
-      return res.json({ success: isValid })
     }
 
     if (action === 'check') {
@@ -74,40 +52,43 @@ export default async function handler(req, res) {
         .eq('device_id', deviceId)
       
       if (error) {
-        console.error('Check error:', error)
-        throw error
+        console.error('Supabase check error:', error)
+        return res.status(500).json({ error: 'Database error', details: error.message })
       }
       
       const isFirstTime = !data || data.length === 0
-      console.log('Check result:', { isFirstTime, dataLength: data?.length })
+      console.log(`Check result - isFirstTime: ${isFirstTime}, found ${data?.length || 0} records`)
       
       return res.json({ isFirstTime })
     }
 
-    if (action === 'reset') {
-      // Verify master password before reset
-      const { data: masterData, error: masterError } = await supabase
+    if (action === 'login') {
+      if (!masterPassword) {
+        return res.status(400).json({ error: 'Master password required' })
+      }
+
+      const { data, error } = await supabase
         .from('master_password')
         .select('password_hash')
         .eq('device_id', deviceId)
+        .order('created_at', { ascending: false })
         .limit(1)
       
-      if (masterError) throw masterError
-      
-      if (!masterData || masterData.length === 0) {
-        return res.json({ success: false, error: 'No master password found' })
+      if (error) {
+        console.error('Supabase login query error:', error)
+        return res.status(500).json({ error: 'Database error', details: error.message })
       }
       
-      const isValid = await bcrypt.compare(masterPassword, masterData[0].password_hash)
-      if (!isValid) {
-        return res.json({ success: false, error: 'Invalid master password' })
+      if (!data || data.length === 0) {
+        console.log('No master password found for device')
+        return res.json({ success: false, isFirstTime: true })
       }
-
-      // Delete all data
-      await supabase.from('master_password').delete().eq('device_id', deviceId)
-      await supabase.from('passwords').delete().eq('device_id', deviceId)
       
-      return res.json({ success: true })
+      console.log('Found master password, verifying...')
+      const isValid = await bcrypt.compare(masterPassword, data[0].password_hash)
+      console.log(`Password verification result: ${isValid}`)
+      
+      return res.json({ success: isValid })
     }
 
     return res.status(400).json({ error: 'Invalid action' })
