@@ -990,29 +990,32 @@ export default function Home() {
             indicator.style.display = show ? 'block' : 'none';
         }
 
-        async function resetAllData() {
-            if (confirm('Are you sure you want to delete ALL data? This cannot be undone!')) {
-                if (confirm('This will permanently delete your master password and all saved passwords. Are you absolutely sure?')) {
-                    try {
-                        if (isOnline) {
-                            await cloudRequest('/auth', {
-                                action: 'reset'
-                            });
-                        } else {
-                            localStorage.removeItem('masterPasswordHash');
-                            localStorage.removeItem('passwords');
-                        }
-                        
-                        showToast('All data deleted successfully', 'success');
-                        setTimeout(() => location.reload(), 1000);
-                        
-                    } catch (error) {
-                        showToast('Failed to delete data', 'error');
-                        console.error(error);
-                    }
-                }
+async function resetAllData() {
+    const masterPassword = prompt('Enter your master password to confirm reset:');
+    if (!masterPassword) {
+        showToast('Reset cancelled', 'error');
+        return;
+    }
+    
+    if (confirm('Are you sure you want to delete ALL data? This cannot be undone!')) {
+        try {
+            const result = await cloudRequest('/auth', {
+                action: 'reset',
+                masterPassword: masterPassword
+            });
+
+            if (result.success) {
+                localStorage.clear();
+                showToast('All data deleted successfully', 'success');
+                location.reload();
+            } else {
+                showToast(result.error || 'Invalid master password', 'error');
             }
+        } catch (error) {
+            showToast('Failed to delete data', 'error');
         }
+    }
+}
 
         function checkLocalAuth() {
             const storedHash = localStorage.getItem('masterPasswordHash');
