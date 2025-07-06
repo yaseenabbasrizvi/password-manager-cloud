@@ -491,37 +491,37 @@ export default function Home() {
         // CLOUD API FUNCTIONS
         // ====================================
 
-async function cloudRequest(endpoint, data = {}) {
-    console.log('Making request to:', endpoint, 'with data:', data); // Debug log
-    
-    try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                ...data,
-                deviceId: DEVICE_ID
-            })
-        });
+        async function cloudRequest(endpoint, data = {}) {
+            console.log('Making request to:', endpoint, 'with data:', data); // Debug log
+            
+            try {
+                const response = await fetch(\`\${API_BASE_URL}\${endpoint}\`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        ...data,
+                        deviceId: DEVICE_ID
+                    })
+                });
 
-        console.log('Response status:', response.status); // Debug log
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+                console.log('Response status:', response.status); // Debug log
+                
+                if (!response.ok) {
+                    throw new Error(\`HTTP \${response.status}\`);
+                }
+
+                const result = await response.json();
+                console.log('Response data:', result); // Debug log
+                
+                return result;
+            } catch (error) {
+                console.error('Cloud request failed:', error);
+                updateCloudStatus(false, 'Connection failed');
+                throw error;
+            }
         }
-
-        const result = await response.json();
-        console.log('Response data:', result); // Debug log
-        
-        return result;
-    } catch (error) {
-        console.error('Cloud request failed:', error);
-        updateCloudStatus(false, 'Connection failed');
-        throw error;
-    }
-}
 
         async function checkCloudStatus() {
             try {
@@ -997,32 +997,32 @@ async function cloudRequest(endpoint, data = {}) {
             indicator.style.display = show ? 'block' : 'none';
         }
 
-async function resetAllData() {
-    const masterPassword = prompt('Enter your master password to confirm reset:');
-    if (!masterPassword) {
-        showToast('Reset cancelled', 'error');
-        return;
-    }
-    
-    if (confirm('Are you sure you want to delete ALL data? This cannot be undone!')) {
-        try {
-            const result = await cloudRequest('/auth', {
-                action: 'reset',
-                masterPassword: masterPassword
-            });
-
-            if (result.success) {
-                localStorage.clear();
-                showToast('All data deleted successfully', 'success');
-                location.reload();
-            } else {
-                showToast(result.error || 'Invalid master password', 'error');
+        async function resetAllData() {
+            const masterPassword = prompt('Enter your master password to confirm reset:');
+            if (!masterPassword) {
+                showToast('Reset cancelled', 'error');
+                return;
             }
-        } catch (error) {
-            showToast('Failed to delete data', 'error');
+            
+            if (confirm('Are you sure you want to delete ALL data? This cannot be undone!')) {
+                try {
+                    const result = await cloudRequest('/auth', {
+                        action: 'reset',
+                        masterPassword: masterPassword
+                    });
+
+                    if (result.success) {
+                        localStorage.clear();
+                        showToast('All data deleted successfully', 'success');
+                        location.reload();
+                    } else {
+                        showToast(result.error || 'Invalid master password', 'error');
+                    }
+                } catch (error) {
+                    showToast('Failed to delete data', 'error');
+                }
+            }
         }
-    }
-}
 
         function checkLocalAuth() {
             const storedHash = localStorage.getItem('masterPasswordHash');
