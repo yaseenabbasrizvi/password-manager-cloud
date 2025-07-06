@@ -259,10 +259,6 @@ export default function Home() {
             background: #dc3545;
         }
 
-        .btn-qr {
-            background: #6f42c1;
-        }
-
         .hidden {
             display: none;
         }
@@ -316,18 +312,6 @@ export default function Home() {
             to { transform: rotate(360deg); }
         }
 
-        .sync-indicator {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 8px;
-            font-size: 14px;
-            display: none;
-        }
-
         @media (max-width: 600px) {
             .generator-options {
                 grid-template-columns: 1fr;
@@ -360,7 +344,7 @@ export default function Home() {
             </div>
 
             <!-- Setup Master Password (First Time) -->
-            <div class="setup-section" id="setupSection">
+            <div class="setup-section" id="setupSection" style="display: none;">
                 <h2>🛡️ Setup Master Password</h2>
                 <p>Create your master password to secure all your data in the cloud.</p>
                 <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
@@ -461,17 +445,13 @@ export default function Home() {
     </div>
 
     <div class="toast" id="toast"></div>
-    <div class="sync-indicator" id="syncIndicator">Syncing...</div>
 
     <script>
         // ====================================
         // CLOUD CONFIGURATION
         // ====================================
         
-        // Change this to your actual API endpoint
         const API_BASE_URL = '/api';
-        
-        // Device identification for multi-device support
         const DEVICE_ID = getOrCreateDeviceId();
         
         let masterKey = null;
@@ -492,7 +472,7 @@ export default function Home() {
         // ====================================
 
         async function cloudRequest(endpoint, data = {}) {
-            console.log('Making request to:', endpoint, 'with data:', data); // Debug log
+            console.log('Making request to:', endpoint, 'with data:', data);
             
             try {
                 const response = await fetch(\`\${API_BASE_URL}\${endpoint}\`, {
@@ -506,14 +486,14 @@ export default function Home() {
                     })
                 });
 
-                console.log('Response status:', response.status); // Debug log
+                console.log('Response status:', response.status);
                 
                 if (!response.ok) {
                     throw new Error(\`HTTP \${response.status}\`);
                 }
 
                 const result = await response.json();
-                console.log('Response data:', result); // Debug log
+                console.log('Response data:', result);
                 
                 return result;
             } catch (error) {
@@ -525,10 +505,7 @@ export default function Home() {
 
         async function checkCloudStatus() {
             try {
-                const result = await cloudRequest('/auth', { 
-                    action: 'check',
-                    masterPassword: 'dummy' 
-                });
+                const result = await cloudRequest('/auth', { action: 'check' });
                 
                 updateCloudStatus(true, 'Connected');
                 
@@ -539,7 +516,6 @@ export default function Home() {
                 }
             } catch (error) {
                 updateCloudStatus(false, 'Offline mode');
-                // Fall back to local storage in offline mode
                 checkLocalAuth();
             }
         }
@@ -551,26 +527,8 @@ export default function Home() {
             
             isOnline = online;
             statusDiv.className = \`cloud-status \${online ? 'online' : 'offline'}\`;
-            statusIcon.textContent = online ? '☁️' : '⚠️';
+            statusIcon.textContent = online ? '☁️' : '📱';
             statusText.textContent = message;
-        }
-
-        function showSetupSection() {
-            document.getElementById('setupSection').style.display = 'block';
-            document.getElementById('authSection').style.display = 'none';
-            document.getElementById('mainApp').classList.add('hidden');
-        }
-
-        function showAuthSection() {
-            document.getElementById('setupSection').style.display = 'none';
-            document.getElementById('authSection').style.display = 'block';
-            document.getElementById('mainApp').classList.add('hidden');
-        }
-
-        function showMainApp() {
-            document.getElementById('setupSection').style.display = 'none';
-            document.getElementById('authSection').style.display = 'none';
-            document.getElementById('mainApp').classList.remove('hidden');
         }
 
         // ====================================
@@ -625,16 +583,27 @@ export default function Home() {
             return new TextDecoder().decode(decrypted);
         }
 
-        async function hashPassword(password) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(password);
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-
         // ====================================
         // AUTHENTICATION FUNCTIONS
         // ====================================
+
+        function showSetupSection() {
+            document.getElementById('setupSection').style.display = 'block';
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('mainApp').classList.add('hidden');
+        }
+
+        function showAuthSection() {
+            document.getElementById('setupSection').style.display = 'none';
+            document.getElementById('authSection').style.display = 'block';
+            document.getElementById('mainApp').classList.add('hidden');
+        }
+
+        function showMainApp() {
+            document.getElementById('setupSection').style.display = 'none';
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('mainApp').classList.remove('hidden');
+        }
 
         async function setupMasterPassword() {
             const password = document.getElementById('newMasterPassword').value;
@@ -654,31 +623,28 @@ export default function Home() {
                 showToast('Master password must be at least 8 characters long', 'error');
                 return;
             }
-            
-            setLoading('setup', true);
-            
+
+            setLoading('setupBtn', true);
+
             try {
-                const hashedPassword = await hashPassword(password);
-                
-                if (isOnline) {
-                    await cloudRequest('/auth', {
-                        action: 'setup',
-                        masterPassword: hashedPassword
-                    });
+                const result = await cloudRequest('/auth', {
+                    action: 'setup',
+                    masterPassword: password
+                });
+
+                if (result.success) {
+                    masterKey = password;
+                    showMainApp();
+                    await loadPasswords();
+                    showToast('Master password created successfully!', 'success');
                 } else {
-                    localStorage.setItem('masterPasswordHash', hashedPassword);
+                    throw new Error(result.error || 'Setup failed');
                 }
-                
-                masterKey = password;
-                showMainApp();
-                await loadPasswords();
-                showToast('Master password created successfully!', 'success');
-                
             } catch (error) {
                 showToast('Failed to create master password', 'error');
                 console.error(error);
             } finally {
-                setLoading('setup', false);
+                setLoading('setupBtn', false);
             }
         }
 
@@ -689,41 +655,34 @@ export default function Home() {
                 showToast('Please enter your master password', 'error');
                 return;
             }
-            
-            setLoading('auth', true);
-            
+
+            setLoading('authBtn', true);
+
             try {
-                const hashedPassword = await hashPassword(password);
-                
-                if (isOnline) {
-                    const result = await cloudRequest('/auth', {
-                        action: 'verify',
-                        masterPassword: hashedPassword
-                    });
-                    
-                    if (!result.success) {
-                        showToast('Incorrect master password', 'error');
-                        return;
-                    }
+                const result = await cloudRequest('/auth', {
+                    action: 'login',
+                    masterPassword: password
+                });
+
+                if (result.success) {
+                    masterKey = password;
+                    showMainApp();
+                    await loadPasswords();
+                    showToast('Successfully authenticated!', 'success');
                 } else {
-                    const storedHash = localStorage.getItem('masterPasswordHash');
-                    if (!storedHash || storedHash !== hashedPassword) {
-                        showToast('Incorrect master password', 'error');
-                        return;
-                    }
+                    showToast('Incorrect master password', 'error');
                 }
-                
-                masterKey = password;
-                showMainApp();
-                await loadPasswords();
-                showToast('Successfully authenticated!', 'success');
-                
             } catch (error) {
                 showToast('Authentication failed', 'error');
                 console.error(error);
             } finally {
-                setLoading('auth', false);
+                setLoading('authBtn', false);
             }
+        }
+
+        function checkLocalAuth() {
+            // For offline mode - simplified version
+            showSetupSection();
         }
 
         // ====================================
@@ -734,65 +693,56 @@ export default function Home() {
             const website = document.getElementById('website').value.trim();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
-            
+
             if (!website || !username || !password) {
                 showToast('Please fill in all fields', 'error');
                 return;
             }
-            
-            setLoading('save', true);
-            
+
+            setLoading('saveBtn', true);
+
             try {
                 const encryptedPassword = await encrypt(password, masterKey);
-                
-                const passwordData = {
-                    website: website,
-                    username: username,
-                    encrypted_password: encryptedPassword,
-                    created_at: new Date().toISOString()
-                };
-                
-                if (isOnline) {
-                    await cloudRequest('/passwords', {
-                        action: 'save',
-                        data: passwordData
-                    });
+
+                const result = await cloudRequest('/passwords', {
+                    action: 'save',
+                    website,
+                    username,
+                    encryptedPassword
+                });
+
+                if (result.success) {
+                    showToast(result.message || 'Password saved successfully!', 'success');
+                    
+                    // Clear form
+                    document.getElementById('website').value = '';
+                    document.getElementById('username').value = '';
+                    document.getElementById('password').value = '';
+
+                    await loadPasswords();
                 } else {
-                    const localPasswords = JSON.parse(localStorage.getItem('passwords') || '[]');
-                    passwordData.id = Date.now();
-                    localPasswords.push(passwordData);
-                    localStorage.setItem('passwords', JSON.stringify(localPasswords));
+                    throw new Error(result.error || 'Save failed');
                 }
-                
-                // Clear form
-                document.getElementById('website').value = '';
-                document.getElementById('username').value = '';
-                document.getElementById('password').value = '';
-                
-                showToast('Password saved successfully!', 'success');
-                await loadPasswords();
-                
             } catch (error) {
                 showToast('Failed to save password', 'error');
                 console.error(error);
             } finally {
-                setLoading('save', false);
+                setLoading('saveBtn', false);
             }
         }
 
         async function loadPasswords() {
             try {
-                if (isOnline) {
-                    const result = await cloudRequest('/passwords', {
-                        action: 'list'
-                    });
-                    passwords = result.passwords || [];
+                const result = await cloudRequest('/passwords', {
+                    action: 'load'
+                });
+
+                if (result.success) {
+                    passwords = result.data || [];
+                    displayPasswords();
                 } else {
-                    passwords = JSON.parse(localStorage.getItem('passwords') || '[]');
+                    throw new Error(result.error || 'Load failed');
                 }
-                
-                displayPasswords();
-                
             } catch (error) {
                 showToast('Failed to load passwords', 'error');
                 console.error(error);
@@ -800,39 +750,44 @@ export default function Home() {
         }
 
         async function deletePassword(id) {
-            if (confirm('Are you sure you want to delete this password?')) {
-                try {
-                    if (isOnline) {
-                        await cloudRequest('/passwords', {
-                            action: 'delete',
-                            id: id
-                        });
-                    } else {
-                        const localPasswords = JSON.parse(localStorage.getItem('passwords') || '[]');
-                        const filteredPasswords = localPasswords.filter(p => p.id !== id);
-                        localStorage.setItem('passwords', JSON.stringify(filteredPasswords));
-                    }
-                    
+            if (!confirm('Are you sure you want to delete this password?')) {
+                return;
+            }
+
+            try {
+                const result = await cloudRequest('/passwords', {
+                    action: 'delete',
+                    passwordId: id
+                });
+
+                if (result.success) {
                     showToast('Password deleted successfully', 'success');
                     await loadPasswords();
-                    
-                } catch (error) {
-                    showToast('Failed to delete password', 'error');
-                    console.error(error);
+                } else {
+                    throw new Error(result.error || 'Delete failed');
                 }
-            }
-        }
-
-        async function copyPassword(encryptedPassword) {
-            try {
-                const password = await decrypt(encryptedPassword, masterKey);
-                await navigator.clipboard.writeText(password);
-                showToast('Password copied to clipboard!', 'success');
             } catch (error) {
-                showToast('Failed to copy password', 'error');
+                showToast('Failed to delete password', 'error');
                 console.error(error);
             }
         }
+
+        async function syncPasswords() {
+            setLoading('syncBtn', true);
+            try {
+                await loadPasswords();
+                showToast('Passwords synced successfully!', 'success');
+            } catch (error) {
+                showToast('Sync failed', 'error');
+                console.error(error);
+            } finally {
+                setLoading('syncBtn', false);
+            }
+        }
+
+        // ====================================
+        // DISPLAY FUNCTIONS
+        // ====================================
 
         function displayPasswords() {
             const list = document.getElementById('passwordList');
@@ -844,16 +799,16 @@ export default function Home() {
                 list.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">No passwords saved yet</p>';
                 return;
             }
-            
-            // Sort by website name
+
             passwords.sort((a, b) => a.website.localeCompare(b.website));
-            
+
             list.innerHTML = passwords.map(p => \`
                 <div class="password-item">
                     <div class="password-info">
                         <h3>\${p.website}</h3>
                         <p>Username: \${p.username}</p>
                         <p>Created: \${new Date(p.created_at).toLocaleDateString()}</p>
+                        \${p.updated_at ? \`<p style="color: #28a745;">Updated: \${new Date(p.updated_at).toLocaleDateString()}</p>\` : ''}
                     </div>
                     <div class="password-actions">
                         <button class="btn btn-small btn-copy" onclick="copyPassword('\${p.encrypted_password}')">Copy Password</button>
@@ -864,28 +819,13 @@ export default function Home() {
             \`).join('');
         }
 
-        // ====================================
-        // SYNC FUNCTIONS
-        // ====================================
-
-        async function syncPasswords() {
-            if (!isOnline) {
-                showToast('Cannot sync - offline mode', 'error');
-                return;
-            }
-            
-            setLoading('sync', true);
-            showSyncIndicator(true);
-            
+        async function copyPassword(encryptedPassword) {
             try {
-                await loadPasswords();
-                showToast('Passwords synced successfully!', 'success');
+                const password = await decrypt(encryptedPassword, masterKey);
+                await navigator.clipboard.writeText(password);
+                showToast('Password copied to clipboard!', 'success');
             } catch (error) {
-                showToast('Sync failed', 'error');
-                console.error(error);
-            } finally {
-                setLoading('sync', false);
-                showSyncIndicator(false);
+                showToast('Failed to copy password', 'error');
             }
         }
 
@@ -976,25 +916,20 @@ export default function Home() {
             }, 3000);
         }
 
-        function setLoading(type, isLoading) {
-            const textElement = document.getElementById(\`\${type}BtnText\`);
-            const loaderElement = document.getElementById(\`\${type}Loader\`);
-            const buttonElement = document.getElementById(\`\${type}Btn\`);
+        function setLoading(buttonId, loading) {
+            const button = document.getElementById(buttonId);
+            const textSpan = document.getElementById(buttonId + 'Text');
+            const loader = document.getElementById(buttonId.replace('Btn', 'Loader'));
             
-            if (isLoading) {
-                textElement.classList.add('hidden');
-                loaderElement.classList.remove('hidden');
-                buttonElement.disabled = true;
+            if (loading) {
+                button.disabled = true;
+                textSpan.classList.add('hidden');
+                loader.classList.remove('hidden');
             } else {
-                textElement.classList.remove('hidden');
-                loaderElement.classList.add('hidden');
-                buttonElement.disabled = false;
+                button.disabled = false;
+                textSpan.classList.remove('hidden');
+                loader.classList.add('hidden');
             }
-        }
-
-        function showSyncIndicator(show) {
-            const indicator = document.getElementById('syncIndicator');
-            indicator.style.display = show ? 'block' : 'none';
         }
 
         async function resetAllData() {
@@ -1024,54 +959,43 @@ export default function Home() {
             }
         }
 
-        function checkLocalAuth() {
-            const storedHash = localStorage.getItem('masterPasswordHash');
-            if (storedHash) {
-                showAuthSection();
-            } else {
-                showSetupSection();
-            }
-        }
+        // ====================================
+        // NETWORK MONITORING
+        // ====================================
+
+        window.addEventListener('online', () => {
+            updateCloudStatus(true, 'Back online');
+            checkCloudStatus();
+        });
+
+        window.addEventListener('offline', () => {
+            updateCloudStatus(false, 'Offline mode');
+        });
 
         // ====================================
         // INITIALIZATION
         // ====================================
 
-        document.addEventListener('DOMContentLoaded', async function() {
-            try {
-                await checkCloudStatus();
-                
-                // Event listeners for Enter key
-                document.getElementById('masterPassword').addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') authenticate();
-                });
-                
-                document.getElementById('confirmMasterPassword').addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') setupMasterPassword();
-                });
+        document.addEventListener('DOMContentLoaded', function() {
+            // Event listeners for Enter key
+            document.getElementById('masterPassword').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') authenticate();
+            });
+            
+            document.getElementById('confirmMasterPassword').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') setupMasterPassword();
+            });
 
-                // Generate initial password
-                generatePassword();
-                
-                // Network status monitoring
-                window.addEventListener('online', () => {
-                    updateCloudStatus(true, 'Back online');
-                    checkCloudStatus();
-                });
-                
-                window.addEventListener('offline', () => {
-                    updateCloudStatus(false, 'Offline mode');
-                });
-                
-            } catch (error) {
-                console.error('Failed to initialize application:', error);
-                showToast('Failed to initialize password manager', 'error');
-            }
+            // Generate initial password
+            generatePassword();
+            
+            // Check cloud status and authentication
+            checkCloudStatus();
         });
     </script>
 </body>
 </html>
-        `
+                `
             }} />
         </>
     )
