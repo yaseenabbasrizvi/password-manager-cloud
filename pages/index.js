@@ -918,17 +918,19 @@ export default function Home() {
 
         function setLoading(buttonId, loading) {
             const button = document.getElementById(buttonId);
-            const textSpan = document.getElementById(buttonId + 'Text');
-            const loader = document.getElementById(buttonId.replace('Btn', 'Loader'));
+            const textSpan = document.getElementById(buttonId.replace('Btn', '') + 'BtnText');
+            const loader = document.getElementById(buttonId.replace('Btn', '') + 'Loader');
             
-            if (loading) {
-                button.disabled = true;
-                textSpan.classList.add('hidden');
-                loader.classList.remove('hidden');
-            } else {
-                button.disabled = false;
-                textSpan.classList.remove('hidden');
-                loader.classList.add('hidden');
+            if (button && textSpan && loader) {
+                if (loading) {
+                    button.disabled = true;
+                    textSpan.classList.add('hidden');
+                    loader.classList.remove('hidden');
+                } else {
+                    button.disabled = false;
+                    textSpan.classList.remove('hidden');
+                    loader.classList.add('hidden');
+                }
             }
         }
 
